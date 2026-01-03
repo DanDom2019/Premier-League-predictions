@@ -137,6 +137,12 @@ def predict_match(home_team_id, away_team_id, league_id):
             else:
                 draw_prob += prob
 
+    total_calculated_prob = home_win_prob + away_win_prob + draw_prob
+    
+    if total_calculated_prob > 0:
+        home_win_prob /= total_calculated_prob
+        away_win_prob /= total_calculated_prob
+        draw_prob /= total_calculated_prob
     # Sort the score probabilities to find the top 5
     sorted_scores = sorted(score_probabilities.items(), key=lambda item: item[1], reverse=True)
     top_five_scores = [
