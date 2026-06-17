@@ -4,7 +4,19 @@ let firstTeamData = null; // Store first team's full data
 let opponentTeam = null;
 let opponentTeamData = null; // Store opponent team's full data
 let nextMatchDetails = null;
+let isReplay = false;
 let predictionChart = null;
+
+// --- Friendly error popup (debounced so back-to-back failures only alert once) ---
+let lastApiUnavailableAt = 0;
+function showApiUnavailableMessage() {
+  const now = Date.now();
+  if (now - lastApiUnavailableAt < 3000) return;
+  lastApiUnavailableAt = now;
+  alert(
+    "Match data is currently unavailable. The new season may not have started yet, or our data provider has temporarily reached its usage limit. Please try again in a few minutes."
+  );
+}
 // Detect if we're running locally or deployed
 const isLocal =
   window.location.hostname === "localhost" ||
@@ -59,6 +71,7 @@ function loadLeagueTeams(leagueId, selectionType) {
             selectFirstTeam(team.TeamID, team.Name, leagueId);
           } else {
             nextMatchDetails = null;
+            isReplay = false;
             selectOpponentTeam(team.TeamID, team.Name, leagueId);
           }
         };
@@ -78,6 +91,7 @@ function selectFirstTeam(teamId, teamName, leagueId) {
   opponentTeam = null;
   opponentTeamData = null;
   nextMatchDetails = null;
+  isReplay = false;
 
   // Use CURRENT_LEAGUE_ID if leagueId is not provided
   const effectiveLeagueId = leagueId || CURRENT_LEAGUE_ID;
@@ -141,6 +155,7 @@ function resetToFirstStage() {
   opponentTeam = null;
   opponentTeamData = null;
   nextMatchDetails = null;
+  isReplay = false;
 
   // Destroy the prediction chart if it exists
   if (predictionChart) {
@@ -182,12 +197,22 @@ async function simulateNextOfficialMatch() {
     const matchData = await response.json();
 
     if (response.ok) {
-      nextMatchDetails = matchData;
+      if (matchData.status === "upcoming") {
+        nextMatchDetails = matchData.match;
+        isReplay = false;
+      } else if (matchData.status === "season_ended") {
+        nextMatchDetails = matchData.last_match;
+        isReplay = true;
+      } else {
+        alert("Unexpected response from server.");
+        return;
+      }
+
       const opponent =
-        matchData.awayTeam.id === firstTeam.id
-          ? matchData.homeTeam
-          : matchData.awayTeam;
-      const opponentLeagueId = matchData.competition.id;
+        nextMatchDetails.awayTeam.id === firstTeam.id
+          ? nextMatchDetails.homeTeam
+          : nextMatchDetails.awayTeam;
+      const opponentLeagueId = nextMatchDetails.competition.id;
 
       // Set opponent team info and fetch their data
       opponentTeam = {
@@ -212,10 +237,10 @@ async function simulateNextOfficialMatch() {
         .getElementById("step3-simulation-result")
         .classList.add("d-none");
     } else {
-      alert(`Error finding next match: ${matchData.error}`);
+      showApiUnavailableMessage();
     }
   } catch (error) {
-    alert(`Network Error: ${error.message}`);
+    showApiUnavailableMessage();
   }
 }
 
@@ -228,14 +253,12 @@ async function fetchOpponentTeamData(teamId) {
       opponentTeamData = data; // Store the opponent team data
       displayMatchUp(); // Now display the match-up with stored data
     } else {
-      const container = document.getElementById("opponent-team-info");
-      container.innerHTML = `<p class="text-danger">Could not load opponent team information: ${
-        data.error || "Unknown error"
-      }</p>`;
+      document.getElementById("opponent-team-info").innerHTML = "";
+      showApiUnavailableMessage();
     }
   } catch (error) {
-    const container = document.getElementById("opponent-team-info");
-    container.innerHTML = `<p class="text-danger">Network Error: ${error.message}</p>`;
+    document.getElementById("opponent-team-info").innerHTML = "";
+    showApiUnavailableMessage();
   }
 }
 
@@ -292,7 +315,19 @@ function displayMatchUp() {
                 <div class="match-details">
                     <h4 class="mb-3">VS</h4>
                     ${
-                      nextMatchDetails
+                      nextMatchDetails && isReplay
+                        ? `
+                        <div class="match-info">
+                            <span class="badge bg-secondary mb-2">🔁 Season Ended — Replay of last match</span>
+                            <p class="mb-1"><strong>Date:</strong></p>
+                            <p class="mb-2">${new Date(
+                              nextMatchDetails.utcDate
+                            ).toLocaleDateString()}</p>
+                            <p class="mb-1"><strong>Final Score:</strong></p>
+                            <p class="mb-0">${nextMatchDetails.score?.fullTime?.home ?? "-"} – ${nextMatchDetails.score?.fullTime?.away ?? "-"}</p>
+                        </div>
+                    `
+                        : nextMatchDetails
                         ? `
                         <div class="match-info">
                             <p class="mb-1"><strong>Date & Time:</strong></p>
@@ -382,7 +417,19 @@ function runSimulation() {
     alert("Error: Both teams must be selected.");
     return;
   }
-  const endpoint = `/simulation/predict?home=${firstTeam.id}&away=${opponentTeam.id}&leagueId=${firstTeam.leagueId}`;
+
+  let homeId, awayId, leagueId;
+  if (nextMatchDetails) {
+    homeId = nextMatchDetails.homeTeam.id;
+    awayId = nextMatchDetails.awayTeam.id;
+    leagueId = nextMatchDetails.competition?.id ?? firstTeam.leagueId;
+  } else {
+    homeId = firstTeam.id;
+    awayId = opponentTeam.id;
+    leagueId = firstTeam.leagueId;
+  }
+
+  const endpoint = `/simulation/predict?home=${homeId}&away=${awayId}&leagueId=${leagueId}`;
   document.getElementById("step3-simulation-result").classList.remove("d-none");
   apiCall(endpoint, "match-result-display", displayPredictionResult);
 }
@@ -639,9 +686,8 @@ async function displayLast10Matches(teamId, leagueId, tableType) {
     loadingState.classList.add("d-none");
 
     if (!response.ok || matches.error) {
-      tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">${
-        matches.error || "Could not load match data."
-      }</td></tr>`;
+      tableBody.innerHTML = "";
+      showApiUnavailableMessage();
       return;
     }
 
@@ -667,7 +713,8 @@ async function displayLast10Matches(teamId, leagueId, tableType) {
     });
   } catch (error) {
     loadingState.classList.add("d-none");
-    tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Network Error: ${error.message}</td></tr>`;
+    tableBody.innerHTML = "";
+    showApiUnavailableMessage();
   }
 }
 
@@ -691,11 +738,12 @@ async function apiCall(endpoint, resultId, displayFunction) {
           "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
       }
     } else {
-      resultDiv.innerHTML =
-        "<h3>Error:</h3><pre>" + JSON.stringify(data, null, 2) + "</pre>";
+      resultDiv.innerHTML = "";
+      showApiUnavailableMessage();
     }
   } catch (error) {
-    resultDiv.innerHTML = `<p class="text-danger">Network or Server Error: ${error.message}</p>`;
+    resultDiv.innerHTML = "";
+    showApiUnavailableMessage();
   }
 }
 

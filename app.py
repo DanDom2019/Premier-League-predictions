@@ -114,29 +114,32 @@ def get_last_10_matches(teamId):
 @app.route('/api/team/<int:teamId>/next_match')
 def get_next_match(teamId):
     """
-    Gets the next upcoming match for a team, sorted by date.
-    This version now correctly checks for both 'SCHEDULED' and 'TIMED' statuses.
+    Returns one of:
+      { "status": "upcoming",     "match":      <match> }  200
+      { "status": "season_ended", "last_match": <match> }  200
+      { "error": "..." }                                   404 (genuinely no matches)
+      { "error": "..." }                                   500 (upstream / API failure)
     """
     try:
         upcoming_matches = load_team_match_upcoming_match(teamId)
-        if not upcoming_matches or 'matches' not in upcoming_matches or not upcoming_matches['matches']:
-            return jsonify({"error": "No upcoming matches found for this team."}), 404
-        
-        # 1. Filter for all matches that haven't been played yet
-        scheduled_matches = [
-            match for match in upcoming_matches['matches'] if match['status'] in ['SCHEDULED', 'TIMED']
-        ]
 
-        if not scheduled_matches:
-            return jsonify({"error": "No scheduled matches found."}), 404
-            
-        # 2. Sort the matches by their date to find the earliest one
-        scheduled_matches.sort(key=lambda x: x['utcDate'])
-        
-        # 3. The first match in the sorted list is the true next match
-        next_match = scheduled_matches[0]
-        
-        return jsonify(next_match)
+        # Malformed/empty upstream payload = API failure, not "no matches".
+        if not upcoming_matches or 'matches' not in upcoming_matches:
+            return jsonify({"error": "Upstream API returned no match data."}), 500
+
+        matches = upcoming_matches['matches']
+
+        scheduled_matches = [m for m in matches if m.get('status') in ('SCHEDULED', 'TIMED')]
+        if scheduled_matches:
+            scheduled_matches.sort(key=lambda x: x['utcDate'])
+            return jsonify({"status": "upcoming", "match": scheduled_matches[0]})
+
+        finished_matches = [m for m in matches if m.get('status') == 'FINISHED']
+        if finished_matches:
+            finished_matches.sort(key=lambda x: x['utcDate'], reverse=True)
+            return jsonify({"status": "season_ended", "last_match": finished_matches[0]})
+
+        return jsonify({"error": "No matches found for this team."}), 404
     except Exception as e:
         print(f"Error fetching next match: {e}")
         return jsonify({"error": "An error occurred while fetching the next match."}), 500
