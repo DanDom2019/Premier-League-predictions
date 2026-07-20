@@ -1,15 +1,30 @@
-import requests
 import os
+from typing import Any, Dict, Optional
 
-API_TOKEN = os.environ.get('FOOTBALL_API_TOKEN', "5d5cbeda806945ef9b31088d6bce37e3")
+import requests
+
 BASE_URL = "https://api.football-data.org/v4"
 
 
-def fetch(path, params=None):
-    url     = BASE_URL + path
+class FootballDataConfigurationError(RuntimeError):
+    """Raised when an API-backed operation is used without provider credentials."""
+
+
+def get_football_api_token() -> str:
+    """Return the provider token without requiring it during application startup."""
+    token = os.environ.get("FOOTBALL_API_TOKEN", "").strip()
+    if not token:
+        raise FootballDataConfigurationError(
+            "Football data provider credentials are not configured."
+        )
+    return token
+
+
+def fetch(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    url = BASE_URL + path
     headers = {
-      "X-Auth-Token": API_TOKEN,
-      "Accept":       "application/json"
+        "X-Auth-Token": get_football_api_token(),
+        "Accept": "application/json",
     }
     resp = requests.get(url, headers=headers, params=params or {})
     resp.raise_for_status()

@@ -3,7 +3,11 @@ import json
 import os
 from datetime import datetime
 from prosessData import process_last_X_games
-from fetchData import load_team_data, load_team_match_upcoming_match
+from fetchData import (
+    FootballDataConfigurationError,
+    load_team_data,
+    load_team_match_upcoming_match,
+)
 # Import your new prediction function
 from simulationModel import predict_match
 from flask_cors import CORS
@@ -30,20 +34,32 @@ def get_current_season():
     else:
         return current_year
 
-# Enhanced CORS configuration
-CORS(app, 
-     origins=['*'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization'],
-     supports_credentials=True)
 
-# Add manual CORS headers as backup
-@app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
-    return response
+PRODUCTION_FRONTEND_ORIGINS = ("https://kickcast.live",)
+
+CORS(
+    app,
+    resources={
+        r"/api/*": {"origins": PRODUCTION_FRONTEND_ORIGINS},
+        r"/app/*": {"origins": PRODUCTION_FRONTEND_ORIGINS},
+        r"/simulation/*": {"origins": PRODUCTION_FRONTEND_ORIGINS},
+    },
+    methods=("GET", "OPTIONS"),
+    allow_headers=("Content-Type",),
+    supports_credentials=False,
+)
+
+
+def provider_not_configured_response():
+    """Return a stable response without exposing configuration details."""
+    return jsonify(
+        {
+            "error": {
+                "code": "provider_not_configured",
+                "message": "Football data is temporarily unavailable.",
+            }
+        }
+    ), 503
 
 # --- Frontend Route ---
 @app.route('/')
@@ -91,6 +107,8 @@ def get_team_by_id(teamId):
         if not team_data:
             return jsonify({"error": "Team not found"}), 404
         return jsonify(team_data)
+    except FootballDataConfigurationError:
+        return provider_not_configured_response()
     except Exception as e:
         print(f"Error in get_team_by_id: {e}")
         return jsonify({"error": "An error occurred on the server"}), 500
@@ -107,6 +125,8 @@ def get_last_10_matches(teamId):
         if not matches:
             return jsonify({"error": "No matches found for this team."}), 404
         return jsonify(matches)
+    except FootballDataConfigurationError:
+        return provider_not_configured_response()
     except Exception as e:
         print(f"Error in get_last_10_matches: {e}")
         return jsonify({"error": "An error occurred while fetching match data."}), 500
@@ -140,6 +160,8 @@ def get_next_match(teamId):
             return jsonify({"status": "season_ended", "last_match": finished_matches[0]})
 
         return jsonify({"error": "No matches found for this team."}), 404
+    except FootballDataConfigurationError:
+        return provider_not_configured_response()
     except Exception as e:
         print(f"Error fetching next match: {e}")
         return jsonify({"error": "An error occurred while fetching the next match."}), 500
@@ -163,6 +185,8 @@ def run_prediction():
         if "error" in prediction_result:
             return jsonify(prediction_result), 500
         return jsonify(prediction_result)
+    except FootballDataConfigurationError:
+        return provider_not_configured_response()
     except Exception as e:
         print(f"Error during simulation: {e}")
         return jsonify({"error": "An internal error occurred during the simulation."}), 500

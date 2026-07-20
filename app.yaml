@@ -1,9 +1,6 @@
 runtime: python311
 entrypoint: gunicorn -b :$PORT app:app
 
-env_variables:
-  FOOTBALL_API_TOKEN: "5d5cbeda806945ef9b31088d6bce37e3"
-
 automatic_scaling:
   min_instances: 0
   max_instances: 10

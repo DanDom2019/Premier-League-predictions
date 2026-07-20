@@ -97,6 +97,9 @@ pip install -r requirements.txt
 ### 3\. Set Environment Variables
 
 You need an API token from [football-data.org](https://www.football-data.org/).
+The application reads it lazily, so health and static routes work without provider
+configuration. API-backed routes return a controlled unavailable response until the
+variable is set.
 
 ```bash
 # On Mac/Linux
@@ -105,6 +108,23 @@ export FOOTBALL_API_TOKEN="your_api_token_here"
 # On Windows (Powershell)
 $env:FOOTBALL_API_TOKEN="your_api_token_here"
 ```
+
+Never put a real token in source files, `app.yaml`, Docker build arguments, or a
+committed `.env` file. `.env.example` lists the required variable without a value.
+
+For Cloud Run, store the replacement credential in Google Secret Manager and expose
+one pinned secret version as `FOOTBALL_API_TOKEN` on the service revision. Grant the
+Cloud Run service identity Secret Manager Secret Accessor permission, then bind the
+secret without placing its value on the command line:
+
+```bash
+gcloud run services update SERVICE_NAME \
+  --region REGION \
+  --update-secrets=FOOTBALL_API_TOKEN=football-api-token:SECRET_VERSION
+```
+
+Confirm the new revision is healthy before directing traffic to it. See
+[`SECURITY.md`](SECURITY.md) for the credential-incident and rotation checklist.
 
 ### 4\. Run the Application
 
